@@ -2,7 +2,7 @@
 课程管理服务
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from ..api import CourseClient
 from ..models import Course, Chapter, Section, Page, Video
@@ -93,3 +93,54 @@ class CourseService:
     
     def get_all_courses(self) -> list[dict]:
         return self.client.get_all_courses_list()
+
+    def get_course_directory(self, textbook_id: int, class_id: int) -> dict:
+        return self.client.get_course_directory(textbook_id, class_id)
+
+    def resolve_chapter_node_id(self, textbook_id: int, class_id: int, chapter_id: int) -> int:
+        directory = self.get_course_directory(textbook_id, class_id)
+        for chapter_data in directory.get("chapters", []):
+            if int(chapter_data.get("id", 0) or 0) == chapter_id:
+                return int(chapter_data.get("nodeid", 0) or 0)
+        return 0
+
+    def find_first_test_section(
+        self,
+        textbook_id: int,
+        class_id: int,
+        chapter_id: int
+    ) -> dict[str, Any]:
+        sections = self.find_test_sections(textbook_id, class_id, chapter_id)
+        return sections[0] if sections else {}
+
+    def find_test_sections(
+        self,
+        textbook_id: int,
+        class_id: int,
+        chapter_id: int
+    ) -> list[dict[str, Any]]:
+        sections: list[dict[str, Any]] = []
+        directory = self.get_course_directory(textbook_id, class_id)
+        for chapter_data in directory.get("chapters", []):
+            if int(chapter_data.get("id", 0) or 0) != chapter_id:
+                continue
+
+            for item_data in chapter_data.get("items", []):
+                coursepages = item_data.get("coursepages", [])
+                test_pages = [page for page in coursepages if page.get("contentType", 0) == 7]
+                if not test_pages:
+                    continue
+
+                first_page = test_pages[0]
+                sections.append({
+                    "chapter_id": int(chapter_data.get("id", 0) or 0),
+                    "chapter_node_id": int(chapter_data.get("nodeid", 0) or 0),
+                    "chapter_title": chapter_data.get("nodetitle", ""),
+                    "item_id": int(item_data.get("itemid", 0) or 0),
+                    "item_title": item_data.get("title", ""),
+                    "page_id": int(first_page.get("id", 0) or 0),
+                    "relation_id": int(first_page.get("relationid", 0) or 0),
+                    "test_page_count": len(test_pages),
+                })
+
+        return sections

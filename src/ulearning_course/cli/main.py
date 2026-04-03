@@ -4,7 +4,7 @@
 
 import argparse
 
-from ..services import CourseService, StudyService
+from ..services import AnswerService, CourseService, SmartService, StudyService
 
 
 def cli():
@@ -35,6 +35,19 @@ def cli():
     complete_parser.add_argument("--class-id", type=int, required=True, help="班级ID")
     complete_parser.add_argument("--user-name", help="用户名；未提供时默认不发送 userName 字段")
     complete_parser.add_argument("--all", action="store_true", help="完成所有未完成视频")
+
+    smart_parser = subparsers.add_parser("smart", help="自动遍历整本教材并完成视频与测试页")
+    smart_parser.add_argument("--textbook-id", "--course-id", dest="textbook_id", type=int, required=True, help="教材ID（兼容旧参数 --course-id）")
+    smart_parser.add_argument("--class-id", type=int, required=True, help="班级ID")
+    smart_parser.add_argument("--user-name", help="用户名；未提供时默认不发送 userName 字段")
+    smart_parser.add_argument("--force-tests", action="store_true", help="即使测试小节已完成，也重新提交答题记录以修正分数")
+    smart_parser.add_argument("--test-interval", type=float, default=0.8, help="测试小节提交间隔秒数，默认 0.8")
+
+    answer_parser = subparsers.add_parser("answer", help="保存测试页答题记录")
+    answer_parser.add_argument("--textbook-id", "--course-id", dest="textbook_id", type=int, help="教材ID（兼容旧参数 --course-id）")
+    answer_parser.add_argument("--class-id", type=int, help="班级ID")
+    answer_parser.add_argument("--chapter-id", type=int, help="学习页 URL 中的目录层 chapterId")
+    answer_parser.add_argument("--item-id", type=int, help="直接指定小节 itemid")
     
     args = parser.parse_args()
     
@@ -56,6 +69,10 @@ def main(args):
         list_videos(args)
     elif args.command == "complete":
         complete_videos(args)
+    elif args.command == "smart":
+        run_smart(args)
+    elif args.command == "answer":
+        answer_tests(args)
 
 
 def list_courses(args):
@@ -227,6 +244,156 @@ def complete_videos(args):
         video = incomplete_videos[0]
         print(f"\n完成第一个未完成视频...")
         study_service.complete_video(video, args.class_id, args.textbook_id, args.user_name)
+
+
+def answer_tests(args):
+    print("=" * 80)
+    print("保存测试页答题记录")
+    print("=" * 80)
+
+    service = AnswerService()
+
+    try:
+        if args.item_id is not None:
+            result = service.answer_item(args.item_id)
+            print(f"模式: itemid 直达")
+        else:
+            missing = [
+                name
+                for name, value in (
+                    ("textbook-id", args.textbook_id),
+                    ("class-id", args.class_id),
+                    ("chapter-id", args.chapter_id),
+                )
+                if value is None
+            ]
+            if missing:
+                print(f"⚠️ 缺少参数: {', '.join(missing)}")
+                print("用法1: answer --item-id <ITEM_ID>")
+                print("用法2: answer --textbook-id <TEXTBOOK_ID> --class-id <CLASS_ID> --chapter-id <CHAPTER_ID>")
+                raise SystemExit(2)
+
+            result = service.answer_chapter(
+                args.textbook_id,
+                args.class_id,
+                args.chapter_id,
+            )
+            print(f"模式: chapter 定位")
+            print(f"输入 textbookId: {args.textbook_id}")
+            print(f"输入 classId: {args.class_id}")
+            print(f"输入 chapterId: {args.chapter_id}")
+            print(f"章节内测试小节数: {result.get('section_count', 0)}")
+
+        print(f"映射 chapterNodeId: {result.get('chapter_node_id')}")
+        print(f"章节标题: {result.get('chapter_title', '')}")
+        print(f"测试页数量: {result.get('test_page_count', 0)}")
+        print(f"题目总数: {result.get('question_count', 0)}")
+        print(f"成功答题数: {result.get('answered_question_count', 0)}")
+        print(f"提交前分数: {result.get('baseline_score', 0)}")
+        print(f"提交分数: {result.get('submitted_score', 0)}")
+        print(f"同步返回码: {result.get('sync_result')}")
+        print(f"首次回读分数: {result.get('readback_score', 0)}")
+
+        items = result.get("items")
+        if items:
+            print("\n小节明细:")
+            for item in items:
+                print(
+                    f"- itemid={item.get('item_id')} | {item.get('item_title', '')} | "
+                    f"页数={item.get('test_page_count', 0)} | 题数={item.get('question_count', 0)} | "
+                    f"提交={item.get('submitted_score', 0)} | 回读={item.get('readback_score', 0)}"
+                )
+        else:
+            print(f"目标 itemid: {result.get('item_id')}")
+            print(f"小节标题: {result.get('item_title', '')}")
+
+        if result.get("matched"):
+            print("\n✅ 已完成测试页答题保存，首次回读分数与提交分数一致")
+            return
+
+        print("\n⚠️ 提交完成，但首次回读分数与提交分数不一致")
+        raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"❌ 保存测试页答题记录失败: {exc}")
+        raise SystemExit(1) from exc
+
+
+def run_smart(args):
+    print("=" * 80)
+    print("教材级智能学习")
+    print("=" * 80)
+    print(f"输入 textbookId: {args.textbook_id}")
+    print(f"输入 classId: {args.class_id}")
+    print(f"强制重提测试: {'是' if args.force_tests else '否'}")
+    print(f"测试提交间隔: {args.test_interval:.1f} 秒")
+
+    service = SmartService()
+
+    try:
+        result = service.run_textbook(
+            args.textbook_id,
+            args.class_id,
+            args.user_name,
+            force_tests=args.force_tests,
+            test_interval_seconds=args.test_interval,
+        )
+
+        print(f"课程名称: {result.get('course_name', '')}")
+        print(f"章节总数: {result.get('chapter_count', 0)}")
+        print(f"视频总数: {result.get('video_count', 0)}")
+        print(f"测试小节总数: {result.get('test_section_count', 0)}")
+
+        chapters = result.get("chapters", [])
+        if chapters:
+            print("\n章节执行明细:")
+            for chapter in chapters:
+                print(
+                    f"- chapterId={chapter.get('chapter_id')} | {chapter.get('chapter_title', '')} | "
+                    f"视频 完成/跳过/失败={chapter.get('completed_videos', 0)}/{chapter.get('skipped_videos', 0)}/{chapter.get('failed_videos', 0)} | "
+                    f"测试 完成/跳过/失败={chapter.get('completed_tests', 0)}/{chapter.get('skipped_tests', 0)}/{chapter.get('failed_tests', 0)}"
+                )
+                for video in chapter.get("videos", []):
+                    if video.get("status") != "failed":
+                        continue
+                    print(
+                        f"  视频失败: itemid={video.get('item_id')} videoid={video.get('video_id')} "
+                        f"title={video.get('title', '')} error={video.get('error', 'unknown')}"
+                    )
+                for test in chapter.get("tests", []):
+                    if test.get("status") != "failed":
+                        continue
+                    print(
+                        f"  测试失败: itemid={test.get('item_id')} "
+                        f"title={test.get('item_title', '')} error={test.get('error', 'unknown')}"
+                    )
+
+        print("\n教材汇总:")
+        print(
+            f"视频 完成/跳过/失败: "
+            f"{result.get('completed_videos', 0)}/"
+            f"{result.get('skipped_videos', 0)}/"
+            f"{result.get('failed_videos', 0)}"
+        )
+        print(
+            f"测试 完成/跳过/失败: "
+            f"{result.get('completed_tests', 0)}/"
+            f"{result.get('skipped_tests', 0)}/"
+            f"{result.get('failed_tests', 0)}"
+        )
+
+        if result.get("success"):
+            print("\n✅ 智能学习执行完成，未发现失败项")
+            return
+
+        print("\n⚠️ 智能学习执行结束，但存在失败项")
+        raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f"❌ 智能学习执行失败: {exc}")
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

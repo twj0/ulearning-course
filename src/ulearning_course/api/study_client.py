@@ -25,6 +25,21 @@ class StudyClient(BaseClient):
         except JSONDecodeError:
             return {}
         return data if isinstance(data, dict) else {}
+
+    def get_question_answer(self, question_id: int, page_id: int) -> dict:
+        url = f"{self.config.UA_BASE_URL}/uaapi/questionAnswer/{question_id}"
+        response = self._get(
+            url,
+            headers=self.auth.get_ua_headers(),
+            params={"parentId": page_id},
+        )
+        if not response.text:
+            return {}
+        try:
+            data = response.json()
+        except JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
     
     def send_heartbeat(self, item_id: int, study_start_time: int) -> int:
         url = f"{self.config.UA_BASE_URL}/uaapi/studyrecord/heartbeat/{item_id}/{study_start_time}"

@@ -1,0 +1,36 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.win*
+# Virtual environments
+.venv
+.ace-tool/
+.env
+cookie.json5
+# docs & scripts
+docs/network-debug/
+developer/network/
+project*.md
+task_detail.md
+/scripts/
+/userscripts/
+docs/network/11-api-course-list-filters-all-inprogress-completed.md
+docs/network/10-student-course-list-inventory.md
+docs/network/09-api-lms-course-list-and-homepage.md
+# test
+tests/test_complete_video.py
+tests/test_study_record_sync.py
+tests/test_username_requirement_probe.py
+tests/test_username_requirement_flow_probe.py
+docs/superpowers/
+tests/analyze_har_timeline.py
+tests/check_test_limit.py
+tests/decrypt_har_sync.py
+tests/test_testpage_answer_improved.py
+tests/test_testpage_answer.py
+tests/test_testpage_immediate_score_sync.py
+tests/test_smart_service.py
