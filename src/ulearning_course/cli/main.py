@@ -25,6 +25,7 @@ def cli():
     info_parser = subparsers.add_parser("info", help="查看课程详情")
     info_parser.add_argument("--textbook-id", "--course-id", dest="textbook_id", type=int, required=True, help="教材ID（兼容旧参数 --course-id）")
     info_parser.add_argument("--class-id", type=int, required=True, help="班级ID")
+    info_parser.add_argument("--chapter-id", type=int, help="仅查看指定 chapterId 的深度结构")
     
     videos_parser = subparsers.add_parser("videos", help="列出课程视频")
     videos_parser.add_argument("--textbook-id", "--course-id", dest="textbook_id", type=int, required=True, help="教材ID（兼容旧参数 --course-id）")
@@ -41,6 +42,8 @@ def cli():
     smart_parser.add_argument("--class-id", type=int, required=True, help="班级ID")
     smart_parser.add_argument("--user-name", help="用户名；未提供时默认不发送 userName 字段")
     smart_parser.add_argument("--force-tests", action="store_true", help="即使测试小节已完成，也重新提交答题记录以修正分数")
+    smart_parser.add_argument("--video-retries", type=int, default=2, help="单个视频失败后的重试次数，默认 2")
+    smart_parser.add_argument("--video-interval", type=float, default=1.0, help="视频处理间隔秒数，默认 1.0")
     smart_parser.add_argument("--test-interval", type=float, default=0.8, help="测试小节提交间隔秒数，默认 0.8")
 
     answer_parser = subparsers.add_parser("answer", help="保存测试页答题记录")
@@ -161,11 +164,48 @@ def show_course_info(args):
     if not course.chapters:
         print("\n⚠️ 课程暂无章节内容")
         return
-    
+
+    target_chapter_id = getattr(args, "chapter_id", None)
+    content_cache: dict[int, dict] = {}
+
     for chapter in course.chapters:
+        if target_chapter_id is not None and int(chapter.chapter_id or 0) != target_chapter_id:
+            continue
+
         print(f"\n{chapter.title}")
+        print(f"  chapterId={chapter.chapter_id}, chapterNodeId={chapter.node_id}")
+        chapter_content = service.client.get_chapter_content(chapter.node_id)
+        content_cache[chapter.node_id] = chapter_content
+        item_map = {
+            int(item.get("itemid", 0) or 0): item
+            for item in chapter_content.get("wholepageItemDTOList", [])
+        }
+
         for section in chapter.sections:
-            print(f"  - {section.title} (itemid: {section.item_id})")
+            item_data = item_map.get(int(section.item_id or 0), {})
+            item_title = item_data.get("title") or section.title
+            print(f"  - {item_title} (itemid: {section.item_id})")
+            print(f"    sectionId={section.section_id}, pageCount={len(section.pages)}")
+            wholepage_map = {
+                int(page.get("relationid", 0) or 0): page
+                for page in item_data.get("wholepageDTOList", [])
+            }
+            for page in section.pages:
+                page_data = wholepage_map.get(int(page.relation_id or 0), {})
+                page_title = page_data.get("content") or page.title
+                print(
+                    f"    * pageId={page.page_id}, relationId={page.relation_id}, "
+                    f"contentType={page.content_type}, title={page_title}"
+                )
+                for component in page_data.get("coursepageDTOList", []):
+                    component_type = int(component.get("type", 0) or 0)
+                    component_desc = describe_component(component)
+                    print(f"      - componentType={component_type} {component_desc}")
+
+    if target_chapter_id is not None:
+        matched = any(int(ch.chapter_id or 0) == target_chapter_id for ch in course.chapters)
+        if not matched:
+            print(f"\n⚠️ 未找到 chapterId={target_chapter_id}")
 
 
 def list_videos(args):
@@ -327,6 +367,8 @@ def run_smart(args):
     print(f"输入 textbookId: {args.textbook_id}")
     print(f"输入 classId: {args.class_id}")
     print(f"强制重提测试: {'是' if args.force_tests else '否'}")
+    print(f"视频重试次数: {args.video_retries}")
+    print(f"视频处理间隔: {args.video_interval:.1f} 秒")
     print(f"测试提交间隔: {args.test_interval:.1f} 秒")
 
     service = SmartService()
@@ -337,6 +379,8 @@ def run_smart(args):
             args.class_id,
             args.user_name,
             force_tests=args.force_tests,
+            video_retry_count=args.video_retries,
+            video_interval_seconds=args.video_interval,
             test_interval_seconds=args.test_interval,
         )
 
@@ -344,6 +388,7 @@ def run_smart(args):
         print(f"章节总数: {result.get('chapter_count', 0)}")
         print(f"视频总数: {result.get('video_count', 0)}")
         print(f"测试小节总数: {result.get('test_section_count', 0)}")
+        print(f"纯内容小节总数: {result.get('content_section_count', 0)}")
 
         chapters = result.get("chapters", [])
         if chapters:
@@ -352,7 +397,8 @@ def run_smart(args):
                 print(
                     f"- chapterId={chapter.get('chapter_id')} | {chapter.get('chapter_title', '')} | "
                     f"视频 完成/跳过/失败={chapter.get('completed_videos', 0)}/{chapter.get('skipped_videos', 0)}/{chapter.get('failed_videos', 0)} | "
-                    f"测试 完成/跳过/失败={chapter.get('completed_tests', 0)}/{chapter.get('skipped_tests', 0)}/{chapter.get('failed_tests', 0)}"
+                    f"测试 完成/跳过/失败={chapter.get('completed_tests', 0)}/{chapter.get('skipped_tests', 0)}/{chapter.get('failed_tests', 0)} | "
+                    f"内容 完成/跳过/失败={chapter.get('completed_contents', 0)}/{chapter.get('skipped_contents', 0)}/{chapter.get('failed_contents', 0)}"
                 )
                 for video in chapter.get("videos", []):
                     if video.get("status") != "failed":
@@ -368,6 +414,13 @@ def run_smart(args):
                         f"  测试失败: itemid={test.get('item_id')} "
                         f"title={test.get('item_title', '')} error={test.get('error', 'unknown')}"
                     )
+                for content in chapter.get("contents", []):
+                    if content.get("status") != "failed":
+                        continue
+                    print(
+                        f"  内容失败: itemid={content.get('item_id')} "
+                        f"title={content.get('item_title', '')} error={content.get('error', 'unknown')}"
+                    )
 
         print("\n教材汇总:")
         print(
@@ -382,6 +435,12 @@ def run_smart(args):
             f"{result.get('skipped_tests', 0)}/"
             f"{result.get('failed_tests', 0)}"
         )
+        print(
+            f"内容 完成/跳过/失败: "
+            f"{result.get('completed_contents', 0)}/"
+            f"{result.get('skipped_contents', 0)}/"
+            f"{result.get('failed_contents', 0)}"
+        )
 
         if result.get("success"):
             print("\n✅ 智能学习执行完成，未发现失败项")
@@ -394,6 +453,25 @@ def run_smart(args):
     except Exception as exc:
         print(f"❌ 智能学习执行失败: {exc}")
         raise SystemExit(1) from exc
+
+
+def describe_component(component: dict) -> str:
+    component_type = int(component.get("type", 0) or 0)
+    if component_type == 4:
+        return (
+            f"[视频] videoId={component.get('resourceid', 0)} "
+            f"duration={component.get('videoLength', 0)}"
+        )
+    if component_type == 6:
+        question_list = component.get("questionDTOList", [])
+        return f"[测试] questionCount={len(question_list)}"
+    if component_type == 12:
+        content = str(component.get("content", "") or "")
+        short = content.replace("\n", " ").replace("\r", " ").strip()
+        if len(short) > 60:
+            short = short[:60] + "..."
+        return f"[富文本] preview={short}"
+    return f"[组件] resourceId={component.get('resourceid', 0)}"
 
 
 if __name__ == "__main__":

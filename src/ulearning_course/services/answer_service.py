@@ -216,20 +216,27 @@ class AnswerService:
                         })
         return questions
 
-    def _get_all_answers(self, questions: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
-        answers: dict[int, dict[str, Any]] = {}
+    def _get_all_answers(
+        self,
+        questions: list[dict[str, Any]],
+    ) -> dict[tuple[int, int], dict[str, Any]]:
+        answers: dict[tuple[int, int], dict[str, Any]] = {}
         for question in questions:
             question_id = question["question_id"]
             page_id = question["page_id"]
+            answer_key = (question_id, page_id)
+            if answer_key in answers:
+                continue
+
             answer_data = self.study_client.get_question_answer(question_id, page_id)
             if answer_data:
-                answers[question_id] = answer_data
+                answers[answer_key] = answer_data
         return answers
 
     def _build_answer_records(
         self,
         questions: list[dict[str, Any]],
-        answers: dict[int, dict[str, Any]],
+        answers: dict[tuple[int, int], dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], int, int]:
         pages_map: dict[tuple[int, int], list[dict[str, Any]]] = {}
         for question in questions:
@@ -247,9 +254,10 @@ class AnswerService:
 
             for question in page_questions:
                 question_id = question["question_id"]
+                page_id = question["page_id"]
                 question_type = question["question_type"]
                 question_score = float(question.get("question_score", 1.0) or 1.0)
-                answer_data = answers.get(question_id)
+                answer_data = answers.get((question_id, page_id))
                 page_total_score += question_score
                 if not answer_data:
                     continue

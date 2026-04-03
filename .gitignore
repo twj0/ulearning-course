@@ -34,3 +34,5 @@ tests/test_testpage_answer_improved.py
 tests/test_testpage_answer.py
 tests/test_testpage_immediate_score_sync.py
 tests/test_smart_service.py
+tests/test_answer_service.py
+tests/test_study_service.py

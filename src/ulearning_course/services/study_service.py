@@ -20,11 +20,32 @@ class StudyService:
     
     def check_video_status(self, video: Video) -> bool:
         try:
-            status = self.study_client.check_completion_status(video.item_id)
+            record = self.study_client.get_study_record(video.item_id)
         except Exception as exc:
             print(f"读取学习状态失败，按未完成处理: itemid={video.item_id}, error={exc}")
             return False
-        return status == 1
+
+        page_records = record.get("pageStudyRecordDTOList", []) if isinstance(record, dict) else []
+        target_page = next(
+            (
+                page for page in page_records
+                if int(page.get("pageid", 0) or 0) == int(video.page_id)
+            ),
+            None,
+        )
+        if target_page is not None:
+            for video_record in target_page.get("videos", []):
+                if int(video_record.get("videoid", 0) or 0) != int(video.video_id):
+                    continue
+                return int(video_record.get("status", 0) or 0) == 1
+            return int(target_page.get("complete", 0) or 0) == 1
+
+        if len(page_records) <= 1:
+            if "completion_status" in record:
+                return int(record.get("completion_status", 0) or 0) == 1
+            return int(record.get("complete", 0) or 0) == 1
+
+        return False
     
     def complete_video(
         self,

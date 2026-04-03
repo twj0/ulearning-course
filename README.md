@@ -76,9 +76,12 @@ AUTHORIZATION=your-token-value
 - `list` 返回的是 LMS `course_instance_id`
 - `list --with-textbook-id` 会额外解析并显示对应的 UA `textbook_id`
 - `resolve-textbook` 用于把 `course_instance_id` 解析成 UA `textbook_id`
-- `info`、`videos`、`complete` 使用的是 UA `textbook_id`
+- `info`、`videos`、`complete`、`smart` 使用的是 UA `textbook_id`
 - `smart` 会遍历整本教材，自动识别未完成视频与测试小节，依次执行“播放/同步/答题/同步”
+- `smart` 也会识别纯内容小节（例如纯富文本/HTML 页面），并通过 `personal/sync` 完成这些页面
 - `smart --force-tests` 会忽略测试小节已完成状态，重新提交测试页答题记录，适合修正历史错误分数
+- `smart --video-retries <次数>` 可在单个视频同步失败后自动重试
+- `smart --video-interval <秒数>` 可降低视频连续提交频率，适合远端连接不稳定时使用
 - `smart --test-interval <秒数>` 可降低测试页连续提交频率，适合远端连接不稳定或批量重提场景
 - `answer` 支持按 `--textbook-id --class-id --chapter-id` 或 `--item-id` 直接保存测试页答题记录
 - `videos` 会逐个读取学习记录，并显示每个视频当前是 `✅ 已完成` 还是 `❌ 未完成`
@@ -114,6 +117,10 @@ uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.c
 uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.cli import cli; cli()" info --textbook-id <教材ID> --class-id <班级ID>
 ```
 ```bash
+# 只查看某一章的深层结构（chapter / item / page / component）
+uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.cli import cli; cli()" info --textbook-id <教材ID> --class-id <班级ID> --chapter-id <URL中的chapterId>
+```
+```bash
 # 列出课程视频
 uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.cli import cli; cli()" videos --textbook-id <教材ID> --class-id <班级ID>
 ```
@@ -136,6 +143,10 @@ uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.c
 ```bash
 # 智能遍历整本教材，并强制重提所有测试小节以修正历史分数
 uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.cli import cli; cli()" smart --textbook-id <教材ID> --class-id <班级ID> --force-tests
+```
+```bash
+# 智能遍历整本教材，并给视频失败增加重试
+uv run python -c "import sys; sys.path.insert(0, 'src'); from ulearning_course.cli import cli; cli()" smart --textbook-id <教材ID> --class-id <班级ID> --video-retries 3 --video-interval 2.0
 ```
 ```bash
 # 智能遍历整本教材，强制重提测试，并放慢测试提交频率
